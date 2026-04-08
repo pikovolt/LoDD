@@ -182,6 +182,121 @@ Flat構造では単一ファイル。Phase構造でも分割が必要になる�
 
 ---
 
+### `interfaces/` の実践補足: データフロー定義と責務境界
+
+interfaces/ の型・シグネチャ定義だけでは、AIに「点」しか伝わらない。
+点と点を繋ぐ線（データフロー）と、各点の守備範囲（責務境界）を
+同じファイル内に明示することで、実装生成の精度が向上する。
+
+#### interfaces/ ファイルの推奨構成
+
+1つの interfaces/ ファイルを以下の3層で構成する。
+
+```text
+1. Data Flow        — 処理の流れと各ステップの入出力型
+2. Responsibility   — 各クラス/関数の「やること」と「やらないこと」
+3. Interface        — 型・シグネチャ・不変条件（従来の記載内容）
+```
+
+3層すべてが常に必要なわけではない。判断基準:
+
+| 条件 | 推奨構成 |
+|------|---------|
+| 単一関数、直線的な処理 | Interface のみ |
+| 2関数以上が連鎖する | Data Flow + Interface |
+| クラス分割がある、またはDCC API依存の局在化が必要 | 3層すべて |
+
+#### 層1: Data Flow
+
+モジュールの公開関数（エントリポイント）の内部処理を、
+順序付きのステップとして記述する。
+
+**記載ルール:**
+- 各ステップに `入力型 → 出力型` を明記する
+- ステップ間で状態が変わる場合（座標系の変化等）、変化内容を記述する
+- ステップの統合・順序変更を禁止する場合は task-xxx.md の Strict Constraints に記載する
+
+**記載例:**
+
+```markdown
+## Data Flow
+
+export() の内部処理は以下の順序で実行される。
+
+1. collect: Scene → List[MeshData]
+   選択オブジェクトからメッシュを収集する。
+   この段階の座標系は kObject（ローカル座標）。
+   ※collect 直後の MeshData は Interface 定義の座標系条件を満たさない中間状態を想定。
+
+2. validate: List[MeshData] → ValidatedBatch
+   トポロジチェックを実施する。
+   不正なメッシュは errors に記録し、valid_meshes から除外する。
+
+3. transform: ValidatedBatch.valid_meshes → List[MeshData]
+   ローカル座標からワールド座標へ変換する。
+   法線の再正規化もここで行う。
+
+4. write: List[MeshData] → ExportResult
+   .obj フォーマットで書き出す。1メッシュずつ逐次処理する。
+```
+
+**Data Flow を書くべき判断基準:**
+処理の中間地点で「データの性質が変わる」場合（座標系、フィルタリング、
+フォーマット変換など）、Data Flow が必要である。
+単に値を受け取って加工して返すだけの関数には不要。
+
+#### 層2: Responsibility Boundaries
+
+クラスまたは主要関数ごとに、責務の範囲を「やること」「やらないこと」の
+対で記述する。
+
+**記載ルール:**
+- 「やらないこと」は隣接する責務との境界を明確にするために書く
+- 外部API（DCC API等）への依存がある場合、どのクラスに局在するかを明記する
+- 依存の局在化により、DCC非依存のクラスは純粋なデータ処理としてテスト可能になる
+
+**記載例:**
+
+```markdown
+## Responsibility Boundaries
+
+### MeshCollector
+- やること: シーンからメッシュの幾何情報を取得し MeshData を生成する
+- やらないこと: バリデーション、座標変換、ファイルI/O
+- 外部API依存: maya.api.OpenMaya（このクラスに局在）
+
+### MeshValidator
+- やること: MeshData のトポロジ整合性を検証し、合格/不合格を分類する
+- やらないこと: メッシュの修復、座標変換
+- 外部API依存: なし
+
+### ObjWriter
+- やること: List[MeshData] を .obj フォーマットで書き出す
+- やらないこと: 収集、バリデーション、座標変換
+- 外部API依存: なし
+```
+
+**Responsibility Boundaries を書くべき判断基準:**
+クラスが2つ以上存在する場合、または DCC API依存を特定のクラスに
+閉じ込める設計意図がある場合に記述する。
+単一クラス・単一関数のモジュールには不要。
+
+#### task-xxx.md との連携
+
+Data Flow やResponsibility Boundaries で定義した制約のうち、
+AIに厳守させたいものは task-xxx.md の Strict Constraints に転記する。
+
+```markdown
+## Strict Constraints
+- Data Flow に定義されたステップの順序を変更しない
+- Data Flow に定義されたステップを統合しない（例: collect と validate を1関数にまとめない）
+- Responsibility Boundaries の「やらないこと」に該当する処理をそのクラスに実装しない
+```
+
+interfaces/ は「定義」、Strict Constraints は「遵守命令」として機能が分離される。
+
+---
+
 ### `knowledge/`
 
 DCC固有の「正しい叩き方」および外部依存の使い方をプールするディレクトリ。
