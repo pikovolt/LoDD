@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lodd-runner"
+version = "0.2.0"
+description = "LoDD task runner implemented with the OpenAI Codex Python SDK."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "openai-codex>=0.1.0b3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+]
+
+[project.scripts]
+lodd-runner = "lodd_runner.main:main"
+
+[tool.setuptools.packages.find]
+include = ["lodd_runner*"]
+
+[tool.pytest.ini_options]
+markers = [
+    "real_subprocess: run the real python -m lodd_runner entrypoint instead of the in-process CLI shim",
+]
